@@ -41,9 +41,11 @@ int directive_type_precedence(DirectiveType type)
 {
 	switch(type)
 	{
+		case DIRECTIVE_ASSIGN:
+		return -1;
+
 		case DIRECTIVE_INVALID:
 		case DIRECTIVE_VAR:
-		case DIRECTIVE_ASSIGN:
 		return 0;
 
 		case DIRECTIVE_ADD:
@@ -73,10 +75,22 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 	while(true)
 	{
 		if(stack->size < 2) return;
-		if(directive_type_precedence(stack->data[stack->size - 1].type) < next_precedence) return;
 
 		Directive* current_directive = &stack->data[stack->size - 1];
 		Directive* previous_directive = &stack->data[stack->size - 2];
+
+		if(current_directive->paren_count > 0 && close_paren)
+		{
+			current_directive->paren_count--;
+			close_paren = false;
+		}
+
+		if(current_directive->paren_count > 0)
+		{
+			return;
+		}
+		
+		if(directive_type_precedence(stack->data[stack->size - 1].type) < next_precedence && !close_paren) return;
 
 		if(current_directive->type == DIRECTIVE_MUL)
 		{
@@ -181,6 +195,11 @@ bool compile_tokens(TokenVector* tv)
 		if(current_token->type == TOKEN_TYPE_SEMICOLON)
 		{
 			process_directive_stack(&stack, 0, false);
+			if (stack.size != 0)
+			{
+				puts("Failed to compile expression. Some directives could not be processed");
+				return false;
+			}
 			return true;
 		}
 
@@ -257,6 +276,11 @@ bool compile_tokens(TokenVector* tv)
 		directive_stack_push(&stack, &directive);
 	}
 
+	if(stack.size != 0)
+	{
+		puts("Failed to compile expression. Some directives could not be processed");
+		return false;
+	}
 	return true;
 }
 
