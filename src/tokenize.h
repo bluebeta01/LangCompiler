@@ -2,6 +2,7 @@
 #define TOKENIZE_H
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum
 {
@@ -11,6 +12,8 @@ typedef enum
 	TOKEN_TYPE_PLUS,
 	TOKEN_TYPE_MINUS,
 	TOKEN_TYPE_STAR,
+	TOKEN_TYPE_AMP,
+	TOKEN_TYPE_SEMICOLON,
 	TOKEN_TYPE_IDENTIFIER,
 	TOKEN_TYPE_INTEGER_LITERAL,
 	TOKEN_TYPE_OPEN_PAREN,
@@ -23,6 +26,7 @@ typedef struct
 {
 	TokenType type;
 	char* name;
+	int int_literal;
 } Token;
 
 typedef struct
@@ -37,5 +41,7 @@ void token_vector_push(TokenVector* tv, Token* token);
 Token* token_vector_at(TokenVector* tv, int index);
 
 bool tokenize_file(FILE* file, TokenVector* tv);
+
+void token_vector_print(TokenVector* tv);
 
 #endif // !TOKENIZE_H
