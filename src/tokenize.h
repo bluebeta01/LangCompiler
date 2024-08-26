@@ -20,6 +20,7 @@ typedef enum
 	TOKEN_TYPE_CLOSE_PAREN,
 	TOKEN_TYPE_U16,
 	TOKEN_TYPE_I16,
+	TOKEN_TYPE_COMMA,
 } TokenType;
 
 typedef struct

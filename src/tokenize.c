@@ -133,6 +133,14 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 			buffer_read_index++;
 			continue;
 		}
+		if (buffer[buffer_read_index] == ',')
+		{
+			Token token = { 0 };
+			token.type = TOKEN_TYPE_COMMA;
+			token_vector_push(tv, &token);
+			buffer_read_index++;
+			continue;
+		}
 		if (buffer[buffer_read_index] == '(')
 		{
 			Token token = { 0 };
