@@ -28,8 +28,8 @@ typedef enum
 	DIRECTIVE_VALUE_TYPE_INVALID,
 	DIRECTIVE_VALUE_TYPE_INT,
 	DIRECTIVE_VALUE_TYPE_CALL,
-	DIRECTIVE_VALUE_TYPE_VAR,
 	DIRECTIVE_VALUE_TYPE_VAR_ADDR,
+	DIRECTIVE_VALUE_TYPE_VAR,
 
 } DirectiveValueType;
 
@@ -150,7 +150,7 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 			return;
 		}
 
-		if(current_directive->value_type == DIRECTIVE_VALUE_TYPE_VAR)
+		if(current_directive->value_type == DIRECTIVE_VALUE_TYPE_VAR_ADDR)
 		{
 			if(current_directive->location == 0)
 			{
@@ -166,7 +166,7 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				puts("push r0");
 			}
 			current_directive->location = 1;
-			current_directive->value_type = DIRECTIVE_VALUE_TYPE_VAR_ADDR;
+			current_directive->value_type = DIRECTIVE_VALUE_TYPE_VAR;
 			current_directive->ref_count = 0;
 		}
 
@@ -202,7 +202,7 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				puts("mov r0, sp");
 				printf("subi #%d\n", current_directive->address);
 				puts("mov r1, r0");
-				if(previous_directive->value_type == DIRECTIVE_VALUE_TYPE_VAR)
+				if(previous_directive->value_type == DIRECTIVE_VALUE_TYPE_VAR_ADDR)
 				{
 					for(int i = 0; i < previous_directive->ref_count - 1; i++)
 					{
@@ -260,13 +260,13 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 		if(stack->size == 1) return;
 		Directive* previous_directive = &stack->data[stack->size - 2];
 
-		if(previous_directive->location == 0)
-		{
-			printf("ldr r0, sp-%d\n", previous_directive->address);
-			puts("push r0");
-			previous_directive->location = 1;
-			previous_directive->ref_count--;
-		}
+		//if(previous_directive->location == 0)
+		//{
+		//	printf("ldr r0, sp-%d\n", previous_directive->address);
+		//	puts("push r0");
+		//	previous_directive->location = 1;
+		//	previous_directive->ref_count--;
+		//}
 
 		if(current_directive->type == DIRECTIVE_MUL)
 		{
@@ -448,7 +448,7 @@ bool compile_tokens(TokenVector* tv, int start_index, DirectiveStack* stack, Pro
 			{
 				process_directive_stack(stack, directive_precedence, false, local_var_stack);
 			}
-			if(stack->data[stack->size - 1].value_type == DIRECTIVE_VALUE_TYPE_VAR && directive_precedence > directive_type_precedence(DIRECTIVE_ASSIGN))
+			if(stack->data[stack->size - 1].value_type == DIRECTIVE_VALUE_TYPE_VAR_ADDR && directive_precedence > directive_type_precedence(DIRECTIVE_ASSIGN))
 			{
 				process_directive_stack(stack, 99, false, local_var_stack);
 			}
@@ -522,7 +522,7 @@ bool compile_tokens(TokenVector* tv, int start_index, DirectiveStack* stack, Pro
 			directive.address = pv->address;
 			directive.type = directive_type;
 			directive.paren_count = paren_count;
-			directive.value_type = DIRECTIVE_VALUE_TYPE_VAR;
+			directive.value_type = DIRECTIVE_VALUE_TYPE_VAR_ADDR;
 			directive.ref_count = ref_count;
 			directive_stack_push(stack, &directive);
 			continue;
