@@ -17,7 +17,7 @@ typedef enum
 	DIRECTIVE_COMMA,
 	DIRECTIVE_OPEN_PAREN,
 	DIRECTIVE_VARIABLE,
-	DIRECTIVE_VARIABLE_ADDR,
+	DIRECTIVE_ADDRESS,
 	DIRECTIVE_INT
 } DirectiveType;
 
@@ -34,7 +34,7 @@ typedef struct
 	Token* token;
 	//VariableType variable_type;
 	//DirectiveValueType value_type;
-	//int ref_count; //How many times we need to deref the directive to get at its value
+	int ref_count;
 	int location; //Whether this var lives in the token(0), the stack(1), or in a register(2)
 	int address; //A stack relative address or a register number
 	//int paren_count; //The number of parens prcedeing the directive
@@ -148,7 +148,7 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 			return;
 		}
 
-		if(current_directive->type == DIRECTIVE_INT || current_directive->type == DIRECTIVE_VARIABLE || current_directive->type == DIRECTIVE_VARIABLE_ADDR)
+		if(current_directive->type == DIRECTIVE_INT || current_directive->type == DIRECTIVE_VARIABLE || current_directive->type == DIRECTIVE_ADDRESS)
 		{
 			directive_index--;
 			continue;
@@ -157,11 +157,23 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 		if(directive_type_precedence(current_directive->type) < next_precedence) return;
 
 		Directive* last_pushed_directive = &stack->data[stack->size - 1];
+		if (last_pushed_directive == current_directive)
+		{
+			return;
+		}
 
 		if(current_directive->type == DIRECTIVE_REF)
 		{
+			puts("mov r0, sp");
+			printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
+			puts("push r0");
+
 			Directive directive = *last_pushed_directive;
-			directive.type = DIRECTIVE_VARIABLE;
+			directive.ref_count = 0;
+			directive.type = DIRECTIVE_ADDRESS;
+			directive.location = 1;
+			directive.address = local_var_stack->stack_size;
+			local_var_stack->stack_size++;
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
 			directive_stack_push(stack, &directive);
@@ -170,27 +182,8 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 		}
 		if(current_directive->type == DIRECTIVE_DEREF)
 		{
-			if(last_pushed_directive->location == 0)
-			{
-				puts("mov r0, sp");
-				printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
-				puts("push r0");
-				local_var_stack->stack_size++;
-				last_pushed_directive->location = 1;
-			}
-			//if(last_pushed_directive->type == DIRECTIVE_VARIABLE_ADDR)
-			//{
-			//	puts("pop r0");
-			//	puts("ldr r0, r0");
-			//	puts("push r0");
-			//	last_pushed_directive->type = DIRECTIVE_VARIABLE;
-			//}
-
-			puts("pop r0");
-			puts("ldr r0, r0");
-			puts("push r0");
-
 			Directive directive = *last_pushed_directive;
+			directive.ref_count++;
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
 			directive_stack_push(stack, &directive);
@@ -223,6 +216,7 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 						printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
 						puts("ldr r2, r0");
 						puts("push r2");
+						local_var_stack->stack_size++;
 					}
 				}
 				ProgramVariable pv = {0};
@@ -240,6 +234,11 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 			{
 				puts("pop r2");
 				local_var_stack->stack_size--;
+
+				for (int i = 0; i < last_pushed_directive->ref_count; i++)
+				{
+					puts("ldr r2, r2");
+				}
 			}
 			else
 			{
@@ -252,13 +251,11 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				{
 					puts("mov r0, sp");
 					printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
-					puts("mov r2, r0");
-				}
-				if(last_pushed_directive->type == DIRECTIVE_VARIABLE_ADDR)
-				{
-					puts("mov r0, sp");
-					printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
 					puts("ldr r2, r0");
+				}
+				for (int i = 0; i < last_pushed_directive->ref_count; i++)
+				{
+					puts("ldr r2, r2");
 				}
 			}
 			if(previous_directive->location == 0)
@@ -266,11 +263,21 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				puts("mov r0, sp");
 				printf("addi #%d\n", local_var_stack->stack_size - previous_directive->address);
 				puts("mov r1, r0");
+
+				for (int i = 0; i < previous_directive->ref_count; i++)
+				{
+					puts("ldr r1, r1");
+				}
 			}
 			if(previous_directive->location == 1)
 			{
 				puts("pop r1");
 				local_var_stack->stack_size--;
+
+				for (int i = 0; i < previous_directive->ref_count - 1; i++)
+				{
+					puts("ldr r1, r1");
+				}
 			}
 
 			puts("str r1, r2");
@@ -290,6 +297,11 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 			{
 				puts("pop r2");
 				local_var_stack->stack_size--;
+				
+				for (int i = 0; i < last_pushed_directive->ref_count; i++)
+				{
+					puts("ldr r2, r2");
+				}
 			}
 			else
 			{
@@ -302,13 +314,11 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				{
 					puts("mov r0, sp");
 					printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
-					puts("mov r2, r0");
-				}
-				if(last_pushed_directive->type == DIRECTIVE_VARIABLE_ADDR)
-				{
-					puts("mov r0, sp");
-					printf("addi #%d\n", local_var_stack->stack_size - last_pushed_directive->address);
 					puts("ldr r2, r0");
+				}
+				for (int i = 0; i < last_pushed_directive->ref_count; i++)
+				{
+					puts("ldr r2, r2");
 				}
 			}
 			if(previous_directive->location == 0)
@@ -322,23 +332,33 @@ void process_directive_stack(DirectiveStack* stack, int next_precedence, bool cl
 				{
 					puts("mov r0, sp");
 					printf("addi #%d\n", local_var_stack->stack_size - previous_directive->address);
-					puts("mov r1, r0");
-				}
-				if(previous_directive->type == DIRECTIVE_VARIABLE_ADDR)
-				{
-					puts("mov r0, sp");
-					printf("addi #%d\n", local_var_stack->stack_size - previous_directive->address);
 					puts("ldr r1, r0");
+
+					for (int i = 0; i < previous_directive->ref_count; i++)
+					{
+						puts("ldr r1, r1");
+					}
 				}
 			}
 			if(previous_directive->location == 1)
 			{
 				puts("pop r1");
 				local_var_stack->stack_size--;
+
+				if(previous_directive->type == DIRECTIVE_VARIABLE)
+				{
+					puts("ldr r1, r1");
+
+					for (int i = 0; i < previous_directive->ref_count; i++)
+					{
+						puts("ldr r1, r1");
+					}
+				}
 			}
 
 			puts("add r1, r2");
 			puts("push r1");
+			local_var_stack->stack_size++;
 			Directive directive = *last_pushed_directive;
 			directive.location = 1;
 			directive_stack_pop(stack);
@@ -430,7 +450,7 @@ bool compile_tokens(TokenVector* tv, int start_index, DirectiveStack* stack, Pro
 				directive_type = DIRECTIVE_DEREF;
 				break;
 			}
-			if(stack->size >= 2 && stack->data[stack->size - 1].type != DIRECTIVE_VARIABLE && stack->data[stack->size - 1].type != DIRECTIVE_INT)
+			if(stack->size >= 1 && stack->data[stack->size - 1].type != DIRECTIVE_VARIABLE && stack->data[stack->size - 1].type != DIRECTIVE_INT)
 			{
 				directive_type = DIRECTIVE_DEREF;
 				break;
@@ -464,7 +484,6 @@ bool compile_tokens(TokenVector* tv, int start_index, DirectiveStack* stack, Pro
 				if (stack->data[i].type != DIRECTIVE_VARIABLE &&
 					stack->data[i].type != DIRECTIVE_INT &&
 					stack->data[i].type != DIRECTIVE_OPEN_PAREN &&
-					stack->data[i].type != DIRECTIVE_VARIABLE_ADDR &&
 					stack->data[i].type != DIRECTIVE_VAR)
 				{
 					if (directive_precedence <= directive_type_precedence(stack->data[i].type))
@@ -504,7 +523,7 @@ bool compile_tokens(TokenVector* tv, int start_index, DirectiveStack* stack, Pro
 			directive.token = current_token;
 			directive.location = 0;
 			directive.address = pv->address;
-			directive.type = DIRECTIVE_VARIABLE_ADDR;
+			directive.type = DIRECTIVE_VARIABLE;
 			directive_stack_push(stack, &directive);
 			continue;
 		}

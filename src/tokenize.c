@@ -72,6 +72,64 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 			read_more = false;
 		}
 
+		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'u' && buffer[buffer_read_index + 1] == '1' && buffer[buffer_read_index + 2] == '6')
+		{
+			int chars_in_buffer = buffer_length - buffer_read_index;
+			if(chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
+			{
+				Token token = {0};
+				token.type = TOKEN_TYPE_U16;
+				token_vector_push(tv, &token);
+				buffer_read_index += 3;
+				continue;
+			}
+			if(chars_in_buffer == 3)
+			{
+				if(eof)
+				{
+					Token token = {0};
+					token.type = TOKEN_TYPE_U16;
+					token_vector_push(tv, &token);
+					buffer_read_index += 3;
+					continue;
+				}
+				else
+				{
+					read_more = true;
+					continue;
+				}
+			}
+		}
+
+		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'i' && buffer[buffer_read_index + 1] == '1' && buffer[buffer_read_index + 2] == '6')
+		{
+			int chars_in_buffer = buffer_length - buffer_read_index;
+			if(chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
+			{
+				Token token = {0};
+				token.type = TOKEN_TYPE_I16;
+				token_vector_push(tv, &token);
+				buffer_read_index += 3;
+				continue;
+			}
+			if(chars_in_buffer == 3)
+			{
+				if(eof)
+				{
+					Token token = {0};
+					token.type = TOKEN_TYPE_I16;
+					token_vector_push(tv, &token);
+					buffer_read_index += 3;
+					continue;
+				}
+				else
+				{
+					read_more = true;
+					continue;
+				}
+			}
+		}
+
 		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'v' && buffer[buffer_read_index + 1] == 'a' && buffer[buffer_read_index + 2] == 'r')
 		{
 			int chars_in_buffer = buffer_length - buffer_read_index;
