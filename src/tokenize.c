@@ -31,6 +31,40 @@ Token* token_vector_at(TokenVector* tv, int index)
 	return &tv->data[index];
 }
 
+int check_keyword(char *buffer, int buffer_size, int buffer_index, TokenVector *tv, char *keyword_text, TokenType token_type, bool eof, bool *read_more)
+{
+	int keyword_text_length = strlen(keyword_text);
+	int remaining_buffer = buffer_size - buffer_index;
+	int min_chars = remaining_buffer < keyword_text_length ? remaining_buffer : keyword_text_length;
+	if (!strncmp(keyword_text, &buffer[buffer_index], min_chars))
+	{
+		if (remaining_buffer > keyword_text_length && !isalnum(buffer[buffer_index + keyword_text_length]))
+		{
+			Token token = {0};
+			token.type = token_type;
+			token_vector_push(tv, &token);
+			return keyword_text_length;
+		}
+		if (remaining_buffer == keyword_text_length)
+		{
+			if (eof)
+			{
+				Token token = {0};
+				token.type = token_type;
+				token_vector_push(tv, &token);
+				return keyword_text_length;
+			}
+			else
+			{
+				*read_more = true;
+				return 0;
+			}
+		}
+	}
+
+	return 0;
+}
+
 bool tokenize_file(FILE* file, TokenVector* tv)
 {
 	char buffer[10];
@@ -71,6 +105,12 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 			if (buffer_length == 0) return true;
 			read_more = false;
 		}
+
+		int keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "struct", TOKEN_TYPE_STRUCT, eof, &read_more);
+		buffer_read_index += keyword_length;
+
+		keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "void", TOKEN_TYPE_VOID, eof, &read_more);
+		buffer_read_index += keyword_length;
 
 		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'u' && buffer[buffer_read_index + 1] == '1' && buffer[buffer_read_index + 2] == '6')
 		{
@@ -211,6 +251,22 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		{
 			Token token = { 0 };
 			token.type = TOKEN_TYPE_CLOSE_PAREN;
+			token_vector_push(tv, &token);
+			buffer_read_index++;
+			continue;
+		}
+		if (buffer[buffer_read_index] == '}')
+		{
+			Token token = { 0 };
+			token.type = TOKEN_TYPE_CLOSE_BRACE;
+			token_vector_push(tv, &token);
+			buffer_read_index++;
+			continue;
+		}
+		if (buffer[buffer_read_index] == '{')
+		{
+			Token token = { 0 };
+			token.type = TOKEN_TYPE_OPEN_BRACE;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
 			continue;
