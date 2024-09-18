@@ -3,18 +3,18 @@
 #include <ctype.h>
 #include "tokenize.h"
 
-void token_vector_init(TokenVector* tv, int capacity)
+void token_vector_init(TokenVector *tv, int capacity)
 {
 	tv->length = 0;
 	tv->capacity = capacity;
 	tv->data = malloc(sizeof(Token) * capacity);
 }
 
-void token_vector_push(TokenVector* tv, Token* token)
+void token_vector_push(TokenVector *tv, Token *token)
 {
 	if (tv->length == tv->capacity)
 	{
-		Token* new_array = malloc(sizeof(Token) * (tv->capacity * 2 + 1));
+		Token *new_array = malloc(sizeof(Token) * (tv->capacity * 2 + 1));
 		memcpy(new_array, tv->data, sizeof(Token) * tv->length);
 		free(tv->data);
 		tv->data = new_array;
@@ -24,14 +24,15 @@ void token_vector_push(TokenVector* tv, Token* token)
 	tv->length++;
 }
 
-Token* token_vector_at(TokenVector* tv, int index)
+Token *token_vector_at(TokenVector *tv, int index)
 {
 	if (index >= tv->capacity)
 		return NULL;
 	return &tv->data[index];
 }
 
-int check_keyword(char *buffer, int buffer_size, int buffer_index, TokenVector *tv, char *keyword_text, TokenType token_type, bool eof, bool *read_more)
+int check_keyword(char *buffer, int buffer_size, int buffer_index, TokenVector *tv, char *keyword_text,
+				  TokenType token_type, bool eof, bool *read_more)
 {
 	int keyword_text_length = strlen(keyword_text);
 	int remaining_buffer = buffer_size - buffer_index;
@@ -65,7 +66,7 @@ int check_keyword(char *buffer, int buffer_size, int buffer_index, TokenVector *
 	return 0;
 }
 
-bool tokenize_file(FILE* file, TokenVector* tv)
+bool tokenize_file(FILE *file, TokenVector *tv)
 {
 	char buffer[10];
 	int buffer_length = 0;
@@ -77,7 +78,8 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 	{
 		if (read_more || buffer_read_index >= buffer_length)
 		{
-			if (eof) return true;
+			if (eof)
+				return true;
 			if (read_more && buffer_read_index == 0)
 			{
 				puts("Token length limit exceeded!");
@@ -102,20 +104,23 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 				puts("Error while reading file in tokenizer.");
 				return false;
 			}
-			if (buffer_length == 0) return true;
+			if (buffer_length == 0)
+				return true;
 			read_more = false;
 		}
 
-		int keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "struct", TOKEN_TYPE_STRUCT, eof, &read_more);
+		int keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "struct", TOKEN_TYPE_STRUCT,
+										   eof, &read_more);
 		buffer_read_index += keyword_length;
 
-		keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "void", TOKEN_TYPE_VOID, eof, &read_more);
+		keyword_length = check_keyword(buffer, buffer_length, buffer_read_index, tv, "void", TOKEN_TYPE_VOID,
+									   eof, &read_more);
 		buffer_read_index += keyword_length;
 
 		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'u' && buffer[buffer_read_index + 1] == '1' && buffer[buffer_read_index + 2] == '6')
 		{
 			int chars_in_buffer = buffer_length - buffer_read_index;
-			if(chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
+			if (chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
 			{
 				Token token = {0};
 				token.type = TOKEN_TYPE_U16;
@@ -123,9 +128,9 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 				buffer_read_index += 3;
 				continue;
 			}
-			if(chars_in_buffer == 3)
+			if (chars_in_buffer == 3)
 			{
-				if(eof)
+				if (eof)
 				{
 					Token token = {0};
 					token.type = TOKEN_TYPE_U16;
@@ -144,7 +149,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'i' && buffer[buffer_read_index + 1] == '1' && buffer[buffer_read_index + 2] == '6')
 		{
 			int chars_in_buffer = buffer_length - buffer_read_index;
-			if(chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
+			if (chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
 			{
 				Token token = {0};
 				token.type = TOKEN_TYPE_I16;
@@ -152,9 +157,9 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 				buffer_read_index += 3;
 				continue;
 			}
-			if(chars_in_buffer == 3)
+			if (chars_in_buffer == 3)
 			{
-				if(eof)
+				if (eof)
 				{
 					Token token = {0};
 					token.type = TOKEN_TYPE_I16;
@@ -173,7 +178,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		if (buffer_length - buffer_read_index >= 3 && buffer[buffer_read_index] == 'v' && buffer[buffer_read_index + 1] == 'a' && buffer[buffer_read_index + 2] == 'r')
 		{
 			int chars_in_buffer = buffer_length - buffer_read_index;
-			if(chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
+			if (chars_in_buffer > 3 && !isalnum(buffer[buffer_read_index + 3]))
 			{
 				Token token = {0};
 				token.type = TOKEN_TYPE_VAR;
@@ -181,9 +186,9 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 				buffer_read_index += 3;
 				continue;
 			}
-			if(chars_in_buffer == 3)
+			if (chars_in_buffer == 3)
 			{
-				if(eof)
+				if (eof)
 				{
 					Token token = {0};
 					token.type = TOKEN_TYPE_VAR;
@@ -201,7 +206,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 
 		if (buffer[buffer_read_index] == '=')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_EQUALS;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -209,7 +214,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '-')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_MINUS;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -217,7 +222,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '+')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_PLUS;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -225,7 +230,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == ';')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_SEMICOLON;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -233,7 +238,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == ',')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_COMMA;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -241,7 +246,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '(')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_OPEN_PAREN;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -249,7 +254,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == ')')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_CLOSE_PAREN;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -257,7 +262,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '}')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_CLOSE_BRACE;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -265,7 +270,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '{')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_OPEN_BRACE;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -273,7 +278,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '*')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_STAR;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
@@ -281,26 +286,26 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 		}
 		if (buffer[buffer_read_index] == '&')
 		{
-			Token token = { 0 };
+			Token token = {0};
 			token.type = TOKEN_TYPE_AMP;
 			token_vector_push(tv, &token);
 			buffer_read_index++;
 			continue;
 		}
 
-		if(isdigit(buffer[buffer_read_index]))
+		if (isdigit(buffer[buffer_read_index]))
 		{
 			int temp_read_index = buffer_read_index;
 			bool match = false;
-			while(true)
+			while (true)
 			{
 				temp_read_index++;
-				if(temp_read_index >= buffer_length)
+				if (temp_read_index >= buffer_length)
 				{
-					if(eof)
+					if (eof)
 					{
 						int token_length = temp_read_index - buffer_read_index;
-						if(token_length > 11)
+						if (token_length > 11)
 						{
 							puts("Tokenizer doesn't support numbers largers than 16 digits");
 							return false;
@@ -324,7 +329,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 						break;
 					}
 				}
-				if(!isdigit(buffer[temp_read_index]))
+				if (!isdigit(buffer[temp_read_index]))
 				{
 					int token_length = temp_read_index - buffer_read_index;
 					if (token_length > 11)
@@ -346,19 +351,20 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 					break;
 				}
 			}
-			if(temp_read_index >= buffer_length || match) continue;
+			if (temp_read_index >= buffer_length || match)
+				continue;
 		}
 
-		if(isalpha(buffer[buffer_read_index]))
+		if (isalpha(buffer[buffer_read_index]))
 		{
 			int temp_read_index = buffer_read_index;
 			bool match = false;
-			while(true)
+			while (true)
 			{
 				temp_read_index++;
-				if(temp_read_index >= buffer_length)
+				if (temp_read_index >= buffer_length)
 				{
-					if(eof)
+					if (eof)
 					{
 						int token_length = temp_read_index - buffer_read_index;
 						Token token = {0};
@@ -377,7 +383,7 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 						break;
 					}
 				}
-				if(!isalnum(buffer[temp_read_index]))
+				if (!isalnum(buffer[temp_read_index]))
 				{
 					int token_length = temp_read_index - buffer_read_index;
 					Token token = {0};
@@ -391,27 +397,28 @@ bool tokenize_file(FILE* file, TokenVector* tv)
 					break;
 				}
 			}
-			if(temp_read_index >= buffer_length || match) continue;
+			if (temp_read_index >= buffer_length || match)
+				continue;
 		}
 
-		if(isspace(buffer[buffer_read_index]))
+		if (isspace(buffer[buffer_read_index]))
 		{
 			buffer_read_index++;
 			continue;
 		}
 
-		//We should never hit this if the file is well formatted
+		// We should never hit this if the file is well formatted
 		puts("Tokenizer error");
 		return false;
 	}
 }
 
-void token_vector_print(TokenVector* tv)
+void token_vector_print(TokenVector *tv)
 {
-	for(int i = 0; i < tv->length; i++)
+	for (int i = 0; i < tv->length; i++)
 	{
-		Token* token = &tv->data[i];
-		switch(token->type)
+		Token *token = &tv->data[i];
+		switch (token->type)
 		{
 		case TOKEN_TYPE_INVALID:
 			puts("Invalid Token");

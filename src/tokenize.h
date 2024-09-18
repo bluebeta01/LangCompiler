@@ -30,23 +30,23 @@ typedef enum
 typedef struct
 {
 	TokenType type;
-	char* name;
+	char *name;
 	int int_literal;
 } Token;
 
 typedef struct
 {
-	Token* data;
+	Token *data;
 	int length;
 	int capacity;
 } TokenVector;
 
-void token_vector_init(TokenVector* tv, int capacity);
-void token_vector_push(TokenVector* tv, Token* token);
-Token* token_vector_at(TokenVector* tv, int index);
+void token_vector_init(TokenVector *tv, int capacity);
+void token_vector_push(TokenVector *tv, Token *token);
+Token *token_vector_at(TokenVector *tv, int index);
 
-bool tokenize_file(FILE* file, TokenVector* tv);
+bool tokenize_file(FILE *file, TokenVector *tv);
 
-void token_vector_print(TokenVector* tv);
+void token_vector_print(TokenVector *tv);
 
 #endif // !TOKENIZE_H
