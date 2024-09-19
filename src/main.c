@@ -30,11 +30,35 @@ typedef enum
 	PRIMITIVE_TYPE_STRUCT
 } PrimitiveType;
 
+typedef struct TypeDescriptor TypeDescriptor;
+
 typedef struct
+{
+	TypeDescriptor *type_descriptor;
+	const char *entry_name;
+	int offset;
+} StructDescriptorEntry;
+
+typedef struct
+{
+	int entry_count;
+	StructDescriptorEntry *entries;
+} StructDescriptor;
+
+struct TypeDescriptor
 {
 	PrimitiveType primitive_type;
 	int pointer_count;
-} TypeDescriptor;
+	const char *type_name;
+	StructDescriptor *struct_descriptor;
+};
+
+typedef struct
+{
+	TypeDescriptor *data;
+	int length;
+	int capacity;
+} TypeDescriptorVector;
 
 typedef struct
 {
@@ -68,6 +92,8 @@ typedef struct
 	int scope_counter;
 } ProgramVariableStack;
 
+TypeDescriptorVector g_tdv;
+
 void prog_var_stack_push(ProgramVariableStack *stack, ProgramVariable *var)
 {
 	stack->data[stack->length] = *var;
@@ -77,6 +103,33 @@ void prog_var_stack_push(ProgramVariableStack *stack, ProgramVariable *var)
 void prog_var_stack_pop(ProgramVariableStack *stack)
 {
 	stack->length--;
+}
+
+void type_desc_vector_push(TypeDescriptorVector *tdv, TypeDescriptor *td)
+{
+	if(tdv->length == tdv->capacity)
+	{
+		puts("TypeDescriptorVector is full!");
+		return;
+	}
+	tdv->data[tdv->length] = *td;
+	tdv->length++;
+}
+
+void type_desc_vector_init(TypeDescriptorVector *tdv)
+{
+	tdv->length = 0;
+	tdv->capacity = 10;
+	tdv->data = malloc(sizeof(TypeDescriptorVector) * 10);
+}
+
+TypeDescriptor *tdv_find_by_name(TypeDescriptorVector *tdv, const char *name)
+{
+	for(int i = 0; i < tdv->length; i++)
+	{
+		if(!strcmp(tdv->data[i].type_name, name)) return &tdv->data[i];
+	}
+	return NULL;
 }
 
 ProgramVariable *prog_var_stack_find(ProgramVariableStack *stack, const char *name)
@@ -454,10 +507,34 @@ TypeDescriptor generate_type_descriptor(TokenVector *tv, int start_index, int *n
 			desc.primitive_type = PRIMITIVE_TYPE_I16;
 			continue;
 		}
+		TypeDescriptor *td = tdv_find_by_name(&g_tdv, tv->data[start_index].name);
+		if(td)
+		{
+			desc.primitive_type = td->primitive_type;
+			desc.pointer_count += td->pointer_count;
+			desc.struct_descriptor = td->struct_descriptor;
+			desc.type_name = td->type_name;
+			continue;
+		}
 		break;
 	}
 	*next_index = start_index;
 	return desc;
+}
+
+bool compile_struct(TokenVector *tv, int start_index)
+{
+	if(tv->length - start_index < 3) goto error_cleanup;
+	Token *identifier_token = &tv->data[start_index + 1];
+	if(tv->data[start_index].type != TOKEN_TYPE_STRUCT) goto error_cleanup;
+	if(tv->data[start_index + 2].type != TOKEN_TYPE_OPEN_BRACE) goto error_cleanup;
+	if(identifier_token->type != TOKEN_TYPE_IDENTIFIER) goto error_cleanup;
+	start_index += 3;
+
+
+	error_cleanup:
+	puts("Failed to compile struct");
+	return false;
 }
 
 bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, ProgramVariableStack *local_var_stack,
@@ -665,6 +742,8 @@ int main(int argc, const char **argv)
 	TokenVector tv = {0};
 	token_vector_init(&tv, 10);
 	tokenize_file(file, &tv);
+
+	type_desc_vector_init(&g_tdv);
 
 	DirectiveStack stack = {0};
 	stack.data = malloc(sizeof(Directive) * 100);
