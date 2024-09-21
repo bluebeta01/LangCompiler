@@ -23,7 +23,7 @@ typedef enum
 
 typedef enum
 {
-	INVALID,
+	PRIMITIVE_TYPE_INVALID,
 	PRIMITIVE_TYPE_VOID,
 	PRIMITIVE_TYPE_U16,
 	PRIMITIVE_TYPE_I16,
@@ -31,26 +31,36 @@ typedef enum
 } PrimitiveType;
 
 typedef struct TypeDescriptor TypeDescriptor;
+typedef struct StructDescriptorEntry StructDescriptorEntry;
 
 typedef struct
 {
-	TypeDescriptor *type_descriptor;
-	const char *entry_name;
-	int offset;
-} StructDescriptorEntry;
+	int length;
+	int capacity;
+	StructDescriptorEntry *data;
+} StructDescriptorEntryVector;
 
 typedef struct
 {
-	int entry_count;
-	StructDescriptorEntry *entries;
+	int size;
+	StructDescriptorEntryVector entries;
 } StructDescriptor;
 
 struct TypeDescriptor
 {
 	PrimitiveType primitive_type;
 	int pointer_count;
+	int size;
 	const char *type_name;
-	StructDescriptor *struct_descriptor;
+	StructDescriptor struct_descriptor;
+};
+
+struct StructDescriptorEntry
+{
+	TypeDescriptor *type_descriptor;
+	const char *entry_name;
+	int offset;
+	int pointer_count;
 };
 
 typedef struct
@@ -94,6 +104,32 @@ typedef struct
 
 TypeDescriptorVector g_tdv;
 
+void sdev_push(StructDescriptorEntryVector *vector, StructDescriptorEntry *entry)
+{
+	if(vector->length == vector->capacity)
+	{
+		//TODO: implement this
+		puts("StructDescriptorEntryVector full!");
+		return;
+	}
+
+	vector->data[vector->length] = *entry;
+	vector->length++;
+}
+
+void struct_descriptor_init(StructDescriptor *descriptor, int initial_entry_capacity)
+{
+	StructDescriptor desc = {0};
+	desc.entries.data = malloc(sizeof(StructDescriptorEntry) * initial_entry_capacity);
+	desc.entries.capacity = initial_entry_capacity;
+	*descriptor = desc;
+}
+
+void struct_descriptor_free(StructDescriptor *descriptor)
+{
+	free(descriptor->entries.data);
+}
+
 void prog_var_stack_push(ProgramVariableStack *stack, ProgramVariable *var)
 {
 	stack->data[stack->length] = *var;
@@ -123,11 +159,36 @@ void type_desc_vector_init(TypeDescriptorVector *tdv)
 	tdv->data = malloc(sizeof(TypeDescriptorVector) * 10);
 }
 
-TypeDescriptor *tdv_find_by_name(TypeDescriptorVector *tdv, const char *name)
+TypeDescriptor *get_type_by_name(TypeDescriptorVector *tdv, Token *name_token)
 {
+	if(name_token->type == TOKEN_TYPE_U16)
+	{
+		static TypeDescriptor desc = {0};
+		desc.primitive_type = PRIMITIVE_TYPE_U16;
+		desc.type_name = "u16";
+		desc.size = 1;
+		return &desc;
+	}
+	if(name_token->type == TOKEN_TYPE_I16)
+	{
+		static TypeDescriptor desc = {0};
+		desc.primitive_type = PRIMITIVE_TYPE_I16;
+		desc.type_name = "i16";
+		desc.size = 1;
+		return &desc;
+	}
+	if(name_token->type == TOKEN_TYPE_VOID)
+	{
+		static TypeDescriptor desc = {0};
+		desc.primitive_type = PRIMITIVE_TYPE_VOID;
+		desc.type_name = "void";
+		desc.size = 0;
+		return &desc;
+	}
+	if(!name_token->name) return NULL;
 	for(int i = 0; i < tdv->length; i++)
 	{
-		if(!strcmp(tdv->data[i].type_name, name)) return &tdv->data[i];
+		if(!strcmp(tdv->data[i].type_name, name_token->name)) return &tdv->data[i];
 	}
 	return NULL;
 }
@@ -487,43 +548,10 @@ int type_descriptor_size(TypeDescriptor *descriptor)
 	}
 }
 
-TypeDescriptor generate_type_descriptor(TokenVector *tv, int start_index, int *next_index)
+bool compile_struct(TokenVector *tv, int start_index, int *last_index)
 {
-	TypeDescriptor desc = {0};
-	for (; start_index < tv->length; start_index++)
-	{
-		if (tv->data[start_index].type == TOKEN_TYPE_STAR)
-		{
-			desc.pointer_count++;
-			continue;
-		}
-		if (tv->data[start_index].type == TOKEN_TYPE_U16)
-		{
-			desc.primitive_type = PRIMITIVE_TYPE_U16;
-			continue;
-		}
-		if (tv->data[start_index].type == TOKEN_TYPE_I16)
-		{
-			desc.primitive_type = PRIMITIVE_TYPE_I16;
-			continue;
-		}
-		TypeDescriptor *td = tdv_find_by_name(&g_tdv, tv->data[start_index].name);
-		if(td)
-		{
-			desc.primitive_type = td->primitive_type;
-			desc.pointer_count += td->pointer_count;
-			desc.struct_descriptor = td->struct_descriptor;
-			desc.type_name = td->type_name;
-			continue;
-		}
-		break;
-	}
-	*next_index = start_index;
-	return desc;
-}
-
-bool compile_struct(TokenVector *tv, int start_index)
-{
+	StructDescriptor struct_descriptor;
+	struct_descriptor_init(&struct_descriptor, 10);
 	if(tv->length - start_index < 3) goto error_cleanup;
 	Token *identifier_token = &tv->data[start_index + 1];
 	if(tv->data[start_index].type != TOKEN_TYPE_STRUCT) goto error_cleanup;
@@ -531,9 +559,77 @@ bool compile_struct(TokenVector *tv, int start_index)
 	if(identifier_token->type != TOKEN_TYPE_IDENTIFIER) goto error_cleanup;
 	start_index += 3;
 
+	for(; start_index < tv->length; start_index++)
+	{
+		if(tv->data[start_index].type == TOKEN_TYPE_CLOSE_BRACE) break;
+
+		TypeDescriptor *type_descriptor = get_type_by_name(&g_tdv, &tv->data[start_index]);
+		if(!type_descriptor)
+		{
+			puts("Expected type name in struct definition!");
+			goto error_cleanup;
+		}
+		start_index++;
+		if(start_index >= tv->length)
+		{
+			puts("Unexpected end of struct definition!");
+			goto error_cleanup;
+		}
+
+		int pointer_count = 0;
+		for(; start_index < tv->length && tv->data[start_index].type == TOKEN_TYPE_STAR; start_index++)
+		{
+			pointer_count++;
+		}
+		if(start_index >= tv->length)
+		{
+			puts("Unexpected end of struct definition!");
+			goto error_cleanup;
+		}
+
+		Token *name_token = &tv->data[start_index];
+		if(name_token->type != TOKEN_TYPE_IDENTIFIER)
+		{
+			puts("Expected identifier in struct definition!");
+			goto error_cleanup;
+		}
+		start_index++;
+		if(start_index >= tv->length)
+		{
+			puts("Unexpected end of struct definition!");
+			goto error_cleanup;
+		}
+		
+		StructDescriptorEntry entry;
+		entry.type_descriptor = type_descriptor;
+		entry.entry_name = name_token->name;
+		entry.offset = struct_descriptor.size;
+		entry.pointer_count = pointer_count;
+		sdev_push(&struct_descriptor.entries, &entry);
+
+		struct_descriptor.size += pointer_count > 0 ? 1 : type_descriptor->size;
+
+		if(tv->data[start_index].type == TOKEN_TYPE_SEMICOLON) continue;
+
+		if(tv->data[start_index].type != TOKEN_TYPE_SEMICOLON)
+		{
+			puts("Expected closing semicolon in struct definition!");
+			goto error_cleanup;
+		}
+	}
+
+	TypeDescriptor type_descriptor = {0};
+	type_descriptor.primitive_type = PRIMITIVE_TYPE_STRUCT;
+	type_descriptor.struct_descriptor = struct_descriptor;
+	type_descriptor.type_name = identifier_token->name;
+	type_descriptor.size = struct_descriptor.size;
+	type_desc_vector_push(&g_tdv, &type_descriptor);
+	*last_index = start_index;
+	return true;
 
 	error_cleanup:
 	puts("Failed to compile struct");
+	struct_descriptor_free(&struct_descriptor);
 	return false;
 }
 
@@ -745,6 +841,28 @@ int main(int argc, const char **argv)
 
 	type_desc_vector_init(&g_tdv);
 
+	int last_index = 0;
+	bool result = compile_struct(&tv, last_index, &last_index);
+	if(!result)
+	{
+		return 1;
+	}
+	last_index++;
+	if(last_index >= tv.length)
+	{
+		return 0;
+	}
+	result = compile_struct(&tv, last_index, &last_index);
+	if(!result)
+	{
+		return 1;
+	}
+	last_index++;
+	if(last_index >= tv.length)
+	{
+		return 0;
+	}
+
 	DirectiveStack stack = {0};
 	stack.data = malloc(sizeof(Directive) * 100);
 	ProgramVariableStack local_var_stack = {0};
@@ -752,7 +870,6 @@ int main(int argc, const char **argv)
 
 	printf("Count: %d\n", tv.length);
 	token_vector_print(&tv);
-	int last_index = 0;
 	while (true)
 	{
 		compile_tokens(&tv, last_index, &stack, &local_var_stack, &last_index);
