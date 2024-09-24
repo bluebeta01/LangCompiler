@@ -74,10 +74,11 @@ typedef struct
 {
 	DirectiveType type;
 	Token *token;
-	TypeDescriptor type_descriptor;
-	int ref_count;
+	TypeDescriptor *type_descriptor;
+	int ref_count; // The number of times we need to defref this to get to it's value
 	int location; // Whether this var lives in the token(0), the stack(1), or in a register(2)
 	int address;  // A stack relative address or a register number
+	int pointer_count; // The number of stars if this directive represents a number (eg. u16** has pointer_count of 2)
 } Directive;
 
 typedef struct
@@ -89,9 +90,10 @@ typedef struct
 typedef struct
 {
 	Token *token;
-	TypeDescriptor type_descriptor;
+	TypeDescriptor *type_descriptor;
 	int address; // Stack pointer relative address
 	int scope;	 // What scope this var is in
+	int pointer_count;
 } ProgramVariable;
 
 typedef struct
@@ -245,8 +247,8 @@ void directive_stack_pop(DirectiveStack *stack)
 
 void compile_add(Directive *lvalue_directive, Directive *rvalue_directive, ProgramVariableStack *local_var_stack)
 {
-	if (lvalue_directive->type_descriptor.primitive_type == PRIMITIVE_TYPE_I16 ||
-		rvalue_directive->type_descriptor.primitive_type == PRIMITIVE_TYPE_U16)
+	if (lvalue_directive->type_descriptor->primitive_type == PRIMITIVE_TYPE_I16 ||
+		rvalue_directive->type_descriptor->primitive_type == PRIMITIVE_TYPE_U16)
 	{
 		if (rvalue_directive->location == 1)
 		{
@@ -347,6 +349,33 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 			return;
 		}
 
+		if(current_directive->type == DIRECTIVE_VAR && next_precedence == 0)
+		{
+			puts("movi #0");
+			if(current_directive->pointer_count + current_directive->type_descriptor->pointer_count > 0)
+			{
+				puts("push r0");
+			}
+			else
+			{
+				for(int i = 0; i < current_directive->type_descriptor->size; i++)
+				{
+					puts("push r0");
+				}
+			}
+
+			ProgramVariable pv = {0};
+			pv.address = local_var_stack->stack_size - 1;
+			pv.token = current_directive->token;
+			pv.scope = local_var_stack->scope_counter;
+			pv.pointer_count = current_directive->pointer_count;
+			pv.type_descriptor = current_directive->type_descriptor;
+			prog_var_stack_push(local_var_stack, &pv);
+			directive_stack_pop(stack);
+			directive_index = stack->size - 1;
+			continue;
+		}
+
 		if (current_directive->type == DIRECTIVE_INT ||
 			current_directive->type == DIRECTIVE_VARIABLE ||
 			current_directive->type == DIRECTIVE_ADDRESS)
@@ -375,7 +404,7 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 			directive.type = DIRECTIVE_ADDRESS;
 			directive.location = 1;
 			directive.address = local_var_stack->stack_size;
-			directive.type_descriptor.pointer_count++;
+			directive.pointer_count++;
 			local_var_stack->stack_size++;
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
@@ -387,7 +416,7 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 		{
 			Directive directive = *rvalue_directive;
 			directive.ref_count++;
-			directive.type_descriptor.pointer_count--;
+			directive.pointer_count--;
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
 			directive_stack_push(stack, &directive);
@@ -401,6 +430,14 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 			return;
 		}
 		Directive *lvalue_directive = &stack->data[directive_index - 1];
+
+		if (lvalue_directive->type_descriptor->primitive_type != rvalue_directive->type_descriptor->primitive_type ||
+			lvalue_directive->type_descriptor->pointer_count != rvalue_directive->type_descriptor->pointer_count ||
+			lvalue_directive->pointer_count != rvalue_directive->pointer_count)
+		{
+			puts("Types not compatible");
+			return;
+		}
 
 		if (current_directive->type == DIRECTIVE_ASSIGN)
 		{
@@ -427,6 +464,7 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 				pv.address = local_var_stack->stack_size - 1;
 				pv.token = lvalue_directive->token;
 				pv.scope = local_var_stack->scope_counter;
+				pv.pointer_count = lvalue_directive->pointer_count;
 				pv.type_descriptor = lvalue_directive->type_descriptor;
 				prog_var_stack_push(local_var_stack, &pv);
 				directive_stack_pop(stack);
@@ -493,13 +531,6 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 			continue;
 
 			puts("Failed to compile assignment directive");
-			return;
-		}
-
-		if (lvalue_directive->type_descriptor.primitive_type != rvalue_directive->type_descriptor.primitive_type ||
-			lvalue_directive->type_descriptor.pointer_count != rvalue_directive->type_descriptor.pointer_count)
-		{
-			puts("Types not compatible");
 			return;
 		}
 
@@ -641,9 +672,21 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 	{
 		int paren_count = 0;
 		Token *current_token = &tv->data[token_vector_index];
-		if (current_token->type == TOKEN_TYPE_VAR)
+		TypeDescriptor *type_descriptor = get_type_by_name(&g_tdv, current_token);
+		if (type_descriptor)
 		{
+			int pointer_count = 0;
 			token_vector_index++;
+			if (token_vector_index >= tv->length)
+			{
+				puts("Invalid variable definition.");
+				*last_index = token_vector_index;
+				return false;
+			}
+			for(; token_vector_index < tv->length && tv->data[token_vector_index].type == TOKEN_TYPE_STAR; token_vector_index++)
+			{
+				pointer_count++;
+			}
 			if (token_vector_index >= tv->length)
 			{
 				puts("Invalid variable definition.");
@@ -660,6 +703,8 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 			Directive directive = {0};
 			directive.token = current_token;
 			directive.type = DIRECTIVE_VAR;
+			directive.type_descriptor = type_descriptor;
+			directive.pointer_count = pointer_count;
 			directive_stack_push(stack, &directive);
 			continue;
 		}
@@ -685,6 +730,7 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 		{
 			Directive directive = {0};
 			directive.type = DIRECTIVE_OPEN_PAREN;
+			directive.type_descriptor= get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_VOID});
 			directive_stack_push(stack, &directive);
 			continue;
 		}
@@ -768,6 +814,7 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 				Directive directive = {0};
 				directive.token = current_token;
 				directive.type = DIRECTIVE_CALL;
+				directive.type_descriptor= get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_VOID});
 				directive_stack_push(stack, &directive);
 				continue;
 			}
@@ -786,6 +833,8 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 			directive.location = 0;
 			directive.address = pv->address;
 			directive.type = DIRECTIVE_VARIABLE;
+			directive.type_descriptor = pv->type_descriptor;
+			directive.pointer_count = pv->pointer_count;
 			directive_stack_push(stack, &directive);
 			continue;
 		}
@@ -795,10 +844,7 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 			Directive directive = {0};
 			directive.token = current_token;
 			directive.type = DIRECTIVE_INT;
-			if (current_token->int_literal < 0)
-				directive.type_descriptor.primitive_type = PRIMITIVE_TYPE_I16;
-			else
-				directive.type_descriptor.primitive_type = PRIMITIVE_TYPE_U16;
+			directive.type_descriptor = get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_I16});
 			directive_stack_push(stack, &directive);
 			continue;
 		}
@@ -806,6 +852,7 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 		Directive directive = {0};
 		directive.token = current_token;
 		directive.type = directive_type;
+		directive.type_descriptor= get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_VOID});
 		directive_stack_push(stack, &directive);
 		continue;
 	}
