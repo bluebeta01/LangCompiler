@@ -245,79 +245,102 @@ void directive_stack_pop(DirectiveStack *stack)
 	stack->size--;
 }
 
+int directive_width(Directive *directive)
+{
+	if (directive->pointer_count + directive->type_descriptor->pointer_count > directive->ref_count)
+		return 1;
+
+	switch(directive->type_descriptor->primitive_type)
+	{
+		PRIMITIVE_TYPE_STRUCT:
+		return directive->type_descriptor->struct_descriptor.size;
+		PRIMITIVE_TYPE_U16:
+		PRIMITIVE_TYPE_I16:
+		return 1;
+		PRIMITIVE_TYPE_VOID:
+		return 0;
+	}
+
+	return 0;
+}
+
 void compile_add(Directive *lvalue_directive, Directive *rvalue_directive, ProgramVariableStack *local_var_stack)
 {
-	if (lvalue_directive->type_descriptor->primitive_type == PRIMITIVE_TYPE_I16 ||
-		rvalue_directive->type_descriptor->primitive_type == PRIMITIVE_TYPE_U16)
+	int lvalue_width = directive_width(lvalue_directive);
+	int rvalue_width = directive_width(rvalue_directive);
+	if (lvalue_width > 1 || rvalue_width > 1)
 	{
-		if (rvalue_directive->location == 1)
-		{
-			puts("pop r2");
-			local_var_stack->stack_size--;
+		puts("Adding types larger than 1 word is not yet supported!");
+		return;
+	}
 
-			for (int i = 0; i < rvalue_directive->ref_count; i++)
-			{
-				puts("ldr r2, r2");
-			}
-		}
-		else
-		{
-			if (rvalue_directive->type == DIRECTIVE_INT)
-			{
-				printf("movi #%d\n", rvalue_directive->token->int_literal);
-				puts("mov r2, r0");
-			}
-			if (rvalue_directive->type == DIRECTIVE_VARIABLE)
-			{
-				puts("mov r0, sp");
-				printf("addi #%d\n", local_var_stack->stack_size - rvalue_directive->address);
-				puts("ldr r2, r0");
-			}
-			for (int i = 0; i < rvalue_directive->ref_count; i++)
-			{
-				puts("ldr r2, r2");
-			}
-		}
-		if (lvalue_directive->location == 0)
-		{
-			if (lvalue_directive->type == DIRECTIVE_INT)
-			{
-				printf("movi #%d\n", lvalue_directive->token->int_literal);
-				puts("mov r1, r0");
-			}
-			if (lvalue_directive->type == DIRECTIVE_VARIABLE)
-			{
-				puts("mov r0, sp");
-				printf("addi #%d\n", local_var_stack->stack_size - lvalue_directive->address);
-				puts("ldr r1, r0");
+	if (rvalue_directive->location == 1)
+	{
+		puts("pop r2");
+		local_var_stack->stack_size--;
 
-				for (int i = 0; i < lvalue_directive->ref_count; i++)
-				{
-					puts("ldr r1, r1");
-				}
-			}
-		}
-		if (lvalue_directive->location == 1)
+		for (int i = 0; i < rvalue_directive->ref_count; i++)
 		{
-			puts("pop r1");
-			local_var_stack->stack_size--;
+			puts("ldr r2, r2");
+		}
+	}
+	else
+	{
+		if (rvalue_directive->type == DIRECTIVE_INT)
+		{
+			printf("movi #%d\n", rvalue_directive->token->int_literal);
+			puts("mov r2, r0");
+		}
+		if (rvalue_directive->type == DIRECTIVE_VARIABLE)
+		{
+			puts("mov r0, sp");
+			printf("addi #%d\n", local_var_stack->stack_size - rvalue_directive->address);
+			puts("ldr r2, r0");
+		}
+		for (int i = 0; i < rvalue_directive->ref_count; i++)
+		{
+			puts("ldr r2, r2");
+		}
+	}
+	if (lvalue_directive->location == 0)
+	{
+		if (lvalue_directive->type == DIRECTIVE_INT)
+		{
+			printf("movi #%d\n", lvalue_directive->token->int_literal);
+			puts("mov r1, r0");
+		}
+		if (lvalue_directive->type == DIRECTIVE_VARIABLE)
+		{
+			puts("mov r0, sp");
+			printf("addi #%d\n", local_var_stack->stack_size - lvalue_directive->address);
+			puts("ldr r1, r0");
 
-			if (lvalue_directive->type == DIRECTIVE_VARIABLE)
+			for (int i = 0; i < lvalue_directive->ref_count; i++)
 			{
 				puts("ldr r1, r1");
-
-				for (int i = 0; i < lvalue_directive->ref_count; i++)
-				{
-					puts("ldr r1, r1");
-				}
 			}
 		}
-
-		puts("add r1, r2");
-		puts("push r1");
-		local_var_stack->stack_size++;
-		lvalue_directive->location = 1;
 	}
+	if (lvalue_directive->location == 1)
+	{
+		puts("pop r1");
+		local_var_stack->stack_size--;
+
+		if (lvalue_directive->type == DIRECTIVE_VARIABLE)
+		{
+			puts("ldr r1, r1");
+
+			for (int i = 0; i < lvalue_directive->ref_count; i++)
+			{
+				puts("ldr r1, r1");
+			}
+		}
+	}
+
+	puts("add r1, r2");
+	puts("push r1");
+	local_var_stack->stack_size++;
+	lvalue_directive->location = 1;
 }
 
 void process_directive_stack(DirectiveStack *stack, int next_precedence, bool close_paren,
@@ -351,21 +374,25 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 
 		if(current_directive->type == DIRECTIVE_VAR && next_precedence == 0)
 		{
+			int push_count = 0;
 			puts("movi #0");
 			if(current_directive->pointer_count + current_directive->type_descriptor->pointer_count > 0)
 			{
 				puts("push r0");
+				push_count++;
 			}
 			else
 			{
 				for(int i = 0; i < current_directive->type_descriptor->size; i++)
 				{
 					puts("push r0");
+					push_count++;
 				}
 			}
+			local_var_stack->stack_size += push_count;
 
 			ProgramVariable pv = {0};
-			pv.address = local_var_stack->stack_size - 1;
+			pv.address = local_var_stack->stack_size - push_count;
 			pv.token = current_directive->token;
 			pv.scope = local_var_stack->scope_counter;
 			pv.pointer_count = current_directive->pointer_count;
