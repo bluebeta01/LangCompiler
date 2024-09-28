@@ -252,16 +252,121 @@ int directive_width(Directive *directive)
 
 	switch(directive->type_descriptor->primitive_type)
 	{
-		PRIMITIVE_TYPE_STRUCT:
+		case PRIMITIVE_TYPE_STRUCT:
 		return directive->type_descriptor->struct_descriptor.size;
-		PRIMITIVE_TYPE_U16:
-		PRIMITIVE_TYPE_I16:
+		case PRIMITIVE_TYPE_U16:
+		case PRIMITIVE_TYPE_I16:
 		return 1;
-		PRIMITIVE_TYPE_VOID:
+		case PRIMITIVE_TYPE_VOID:
 		return 0;
 	}
 
 	return 0;
+}
+
+void load_sprelative_addr(int addr)
+{
+	if(addr <= 255)
+	{
+		puts("mov sp, r0");
+		printf("addi #%d\n", addr);
+		return;
+	}
+	printf("mhi HI(#%d)\n", addr);
+	printf("ori LO(#%d)\n", addr);
+	puts("add r0, sp");
+}
+
+void copy_directive_value(Directive *dst, Directive *src, int stack_size)
+{
+	load_sprelative_addr(stack_size - dst->address);
+	for(int i = 0; i < dst->ref_count; i++)
+	{
+		puts("ldr r0, r0");
+	}
+	puts("mov r1, r0");
+
+	if(src->location == 0)
+	{
+		if(src->type == DIRECTIVE_INT)
+		{
+			printf("mhi HI(#%d)\n", src->token->int_literal);
+			printf("ori LO(#%d)\n", src->token->int_literal);
+			puts("str r1, r0");
+			return;
+		}
+		if(src->type == DIRECTIVE_VARIABLE)
+		{
+			load_sprelative_addr(stack_size - src->address);
+			for(int i = 0; i < src->ref_count; i++)
+			{
+				puts("ldr r0, r0");
+			}
+			puts("mov r2, r0");
+		}
+	}
+	if(src->location == 1)
+	{
+		load_sprelative_addr(stack_size - src->address);
+		for (int i = 0; i < src->ref_count; i++)
+		{
+			puts("ldr r0, r0");
+		}
+		puts("mov r2, r0");
+	}
+
+	int size = directive_width(src);
+	for(int i = 0; i < size; i++)
+	{
+		puts("ldr r0, r2");
+		puts("str r1, r0");
+		puts("movi #1");
+		puts("add r1, r0");
+		puts("add r2, r0");
+	}
+
+}
+
+//Copies a value of width size from sp+src to sp+dst
+void copy_value_sprelative(int dst, int src, int size)
+{
+	if(size == 0) return;
+	if(dst <= 255 && src <= 255)
+	{
+		if(size == 1)
+		{
+			puts("push r1");
+			puts("mov r0, sp");
+			printf("addi #%d\n", src + 1);
+			puts("ldr r1, r0");
+			puts("mov r0, sp");
+			printf("addi #%d\n", dst + 1);
+			puts("str r0, r1");
+			puts("pop r1");
+			return;
+		}
+	}
+	puts("push r1");
+	puts("push r2");
+
+	puts("mov sp, r0");
+	printf("addi #%d\n", dst + 2);
+	puts("mov r1, r0");
+	puts("mov sp, r0");
+	printf("addi #%d\n", src + 2);
+	puts("mov r2, r0");
+
+	for(int i = 0; i < size; i++)
+	{
+		puts("ldr r0, r2");
+		puts("str r1, r0");
+		puts("movi #1");
+		puts("add r1, r0");
+		puts("add r2, r0");
+	}
+
+	puts("pop r2");
+	puts("pop r1");
 }
 
 void compile_add(Directive *lvalue_directive, Directive *rvalue_directive, ProgramVariableStack *local_var_stack)
@@ -500,57 +605,9 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 				directive_index = stack->size - 1;
 				continue;
 			}
-			if (rvalue_directive->location == 1)
-			{
-				puts("pop r2");
-				local_var_stack->stack_size--;
 
-				for (int i = 0; i < rvalue_directive->ref_count; i++)
-				{
-					puts("ldr r2, r2");
-				}
-			}
-			else
-			{
-				if (rvalue_directive->type == DIRECTIVE_INT)
-				{
-					printf("movi #%d\n", rvalue_directive->token->int_literal);
-					puts("mov r2, r0");
-				}
-				if (rvalue_directive->type == DIRECTIVE_VARIABLE)
-				{
-					puts("mov r0, sp");
-					printf("addi #%d\n", local_var_stack->stack_size - rvalue_directive->address);
-					puts("ldr r2, r0");
-				}
-				for (int i = 0; i < rvalue_directive->ref_count; i++)
-				{
-					puts("ldr r2, r2");
-				}
-			}
-			if (lvalue_directive->location == 0)
-			{
-				puts("mov r0, sp");
-				printf("addi #%d\n", local_var_stack->stack_size - lvalue_directive->address);
-				puts("mov r1, r0");
+			copy_directive_value(lvalue_directive, rvalue_directive, local_var_stack->stack_size);
 
-				for (int i = 0; i < lvalue_directive->ref_count; i++)
-				{
-					puts("ldr r1, r1");
-				}
-			}
-			if (lvalue_directive->location == 1)
-			{
-				puts("pop r1");
-				local_var_stack->stack_size--;
-
-				for (int i = 0; i < lvalue_directive->ref_count - 1; i++)
-				{
-					puts("ldr r1, r1");
-				}
-			}
-
-			puts("str r1, r2");
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
 			directive_stack_pop(stack);
