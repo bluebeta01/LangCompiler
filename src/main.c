@@ -214,19 +214,19 @@ int directive_type_precedence(DirectiveType type)
 	case DIRECTIVE_ASSIGN:
 		return 1;
 
+	case DIRECTIVE_COMMA:
+		return 0;
+
 	case DIRECTIVE_REF:
 	case DIRECTIVE_DEREF:
 	case DIRECTIVE_ADD:
 	case DIRECTIVE_SUB:
-		return 2;
-
-	case DIRECTIVE_MUL:
 		return 3;
 
-	case DIRECTIVE_CALL:
+	case DIRECTIVE_MUL:
 		return 4;
 
-	case DIRECTIVE_COMMA:
+	case DIRECTIVE_CALL:
 		return 5;
 
 	default:
@@ -325,6 +325,24 @@ void copy_directive_value(Directive *dst, Directive *src, int stack_size)
 		puts("add r2, r0");
 	}
 
+}
+
+//Copies the value at sp+src to the address in register dst; clobbers dst
+void copy_value_to_reg_ptr(int dst, int src, int size)
+{
+	int src_reg = dst == 1 ? 2 : 1;
+	puts("mov r0, sp");
+	printf("addi #%d\n", src);
+	printf("mov r0, %d\n", src_reg);
+
+	for(int i = 0; i < size; i++)
+	{
+		printf("ldr r0, r%d\n", src_reg);
+		printf("str r0, r%d\n", dst);
+		puts("movi #1");
+		printf("add r%d, r0\n", dst);
+		printf("add r%d, r0\n", src_reg);
+	}
 }
 
 //Copies a value of width size from sp+src to sp+dst
@@ -445,7 +463,92 @@ void compile_add(Directive *lvalue_directive, Directive *rvalue_directive, Progr
 	puts("add r1, r2");
 	puts("push r1");
 	local_var_stack->stack_size++;
+	lvalue_directive->address = local_var_stack->stack_size - 1;
 	lvalue_directive->location = 1;
+	lvalue_directive->type = DIRECTIVE_INT;
+}
+
+void move_directive_to_stack(Directive *directive, ProgramVariableStack *pvs)
+{
+	if(directive->location == 1) return;
+	directive->location = 1;
+
+	if(directive->ref_count > 0 || directive->type_descriptor->pointer_count > 0)
+	{
+		puts("mov r0, sp");
+		printf("addi #%d\n", pvs->stack_size - directive->address);
+		puts("ldr r0, r0");
+		puts("push r0");
+		pvs->stack_size++;
+		return;
+	}
+
+	if(directive->type == DIRECTIVE_INT)
+	{
+		printf("movi HI(#%d)\n", directive->token->int_literal);
+		printf("ori LO(#%d)\n", directive->token->int_literal);
+		puts("push r0");
+		pvs->stack_size++;
+		return;
+	}
+
+	if(directive->type_descriptor->size == 1)
+	{
+		puts("mov r0, sp");
+		printf("addi #%d\n", pvs->stack_size - directive->address);
+		puts("ldr r0, r0");
+		puts("push r0");
+		pvs->stack_size++;
+		return;
+	}
+
+	printf("movi HI(#%d)\n", directive->type_descriptor->size);
+	printf("movi LO(#%d)\n", directive->type_descriptor->size);
+	puts("sub sp, r0");
+	puts("mov r0, sp");
+	puts("addi #1");
+	puts("mov r3, r0");
+	pvs->stack_size += directive->type_descriptor->size;
+	copy_value_to_reg_ptr(3, pvs->stack_size - directive->address, directive->type_descriptor->size);
+}
+
+void push_directive_to_stack(Directive *directive, ProgramVariableStack *pvs)
+{
+	if(directive->location == 0)
+	{
+		move_directive_to_stack(directive, pvs);
+		return;
+	}
+	if(directive->type_descriptor->size == 1 || directive->pointer_count > 0)
+	{
+		if(directive->address <= 255)
+		{
+			puts("mov r0, sp");
+			printf("addi #%d\n", pvs->stack_size - directive->address);
+			puts("ldr r0, r0");
+			puts("push r0");
+			pvs->stack_size++;
+			return;
+		}
+		printf("mhi HI(#%d)\n", pvs->stack_size - directive->address);
+		printf("ori LO(#%d)\n", pvs->stack_size - directive->address);
+		puts("add r0, sp");
+		puts("ldr r0, r0");
+		puts("push r0");
+		pvs->stack_size++;
+		return;
+	}
+
+	printf("mhi HI(#%d)\n", pvs->stack_size - directive->address);
+	printf("ori LO(#%d)\n", pvs->stack_size - directive->address);
+	puts("add r0, sp");
+	for(int i = 0; i < directive->type_descriptor->size; i++)
+	{
+		puts("ldr r1, r0");
+		puts("push r1");
+		pvs->stack_size++;
+		puts("addi #1");
+	}
 }
 
 void process_directive_stack(DirectiveStack *stack, int next_precedence, bool close_paren,
@@ -461,9 +564,29 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 
 		if (current_directive->type == DIRECTIVE_OPEN_PAREN)
 		{
-
 			if (!close_paren)
 				return;
+			if(directive_index >= 1)
+			{
+				Directive *previous_directive = &stack->data[directive_index - 1];
+				if(previous_directive->type == DIRECTIVE_CALL)
+				{
+					if(directive_index + 1 < stack->size)
+					{
+						Directive *next_directive = &stack->data[directive_index + 1];
+						if (next_directive->location == 0)
+							move_directive_to_stack(next_directive, local_var_stack);
+						directive_stack_pop(stack);
+					}
+					printf("movi HI(%s)\n", previous_directive->token->name);
+					printf("movi LO(%s)\n", previous_directive->token->name);
+					puts("call r0");
+					directive_stack_pop(stack);
+					directive_stack_pop(stack);
+					directive_index = stack->size - 1;
+					return;
+				}
+			}
 			if (directive_index + 1 >= stack->size)
 			{
 				puts("Failed to compile open paren.");
@@ -523,6 +646,21 @@ void process_directive_stack(DirectiveStack *stack, int next_precedence, bool cl
 		if (rvalue_directive == current_directive)
 		{
 			return;
+		}
+		
+		if(current_directive->type == DIRECTIVE_COMMA)
+		{
+			if(!close_paren)
+			{
+				directive_index--;
+				continue;
+			}
+
+			push_directive_to_stack(rvalue_directive, local_var_stack);
+			directive_stack_pop(stack);
+			directive_stack_pop(stack);
+			directive_index = stack->size - 1;
+			continue;
 		}
 
 		if (current_directive->type == DIRECTIVE_REF)
@@ -854,6 +992,10 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 			directive_type = DIRECTIVE_REF;
 			break;
 
+		case TOKEN_TYPE_COMMA:
+			directive_type = DIRECTIVE_COMMA;
+			break;
+
 		case TOKEN_TYPE_INTEGER_LITERAL:
 			directive_type = DIRECTIVE_INT;
 			break;
@@ -869,21 +1011,18 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 		}
 		int directive_precedence = directive_type_precedence(directive_type);
 
-		if (directive_precedence != 0)
+		for (int i = stack->size - 1; i >= 0; i--)
 		{
-			for (int i = stack->size - 1; i >= 0; i--)
+			if (stack->data[i].type != DIRECTIVE_VARIABLE &&
+				stack->data[i].type != DIRECTIVE_INT &&
+				stack->data[i].type != DIRECTIVE_OPEN_PAREN &&
+				stack->data[i].type != DIRECTIVE_VAR)
 			{
-				if (stack->data[i].type != DIRECTIVE_VARIABLE &&
-					stack->data[i].type != DIRECTIVE_INT &&
-					stack->data[i].type != DIRECTIVE_OPEN_PAREN &&
-					stack->data[i].type != DIRECTIVE_VAR)
+				if (directive_precedence <= directive_type_precedence(stack->data[i].type))
 				{
-					if (directive_precedence <= directive_type_precedence(stack->data[i].type))
-					{
-						process_directive_stack(stack, directive_precedence, false, local_var_stack);
-					}
-					break;
+					process_directive_stack(stack, directive_precedence, false, local_var_stack);
 				}
+				break;
 			}
 		}
 
@@ -898,7 +1037,7 @@ bool compile_tokens(TokenVector *tv, int start_index, DirectiveStack *stack, Pro
 				Directive directive = {0};
 				directive.token = current_token;
 				directive.type = DIRECTIVE_CALL;
-				directive.type_descriptor= get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_VOID});
+				directive.type_descriptor = get_type_by_name(&g_tdv, &(Token){.type = TOKEN_TYPE_VOID});
 				directive_stack_push(stack, &directive);
 				continue;
 			}
