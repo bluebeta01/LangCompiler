@@ -151,6 +151,9 @@ int node_precedence(NodeType type)
 		case NODE_DEREF:
 		return 3;
 
+		case NODE_SUBSCRIPT:
+		return 4;
+
 		case NODE_CONSTANT:
 		case NODE_VARIABLE:
 		return 99;
@@ -305,6 +308,22 @@ void type_desc_vector_init(TypeDescriptorVector *tdv)
 	tdv->data = malloc(sizeof(TypeDescriptorVector) * 10);
 }
 
+//Gets the width of a type descriptor's primitive type
+int type_descriptor_primitive_width(TypeDescriptor *desc)
+{
+	switch(desc->primitive_type)
+	{
+		case PRIMITIVE_TYPE_I16:
+		case PRIMITIVE_TYPE_U16:
+		return 1;
+
+		case PRIMITIVE_TYPE_STRUCT:
+		return desc->struct_descriptor.size;
+	}
+
+	return 0;
+}
+
 //Creates a type descriptor from tokens and returns the next index in tv
 int type_descriptor_from_tokens(TokenVector *tv, int start_index, TypeDescriptor *desc)
 {
@@ -356,6 +375,7 @@ int type_descriptor_from_tokens(TokenVector *tv, int start_index, TypeDescriptor
 		if(tv->data[start_index].type == TOKEN_TYPE_STAR)
 		{
 			desc->pointer_count++;
+			desc->size = 1;
 			continue;
 		}
 		break;
@@ -527,22 +547,6 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 		return;
 	}
 
-//	if(node->type == NODE_REF)
-//	{
-//		node->type = node->right->type;
-//		node->type_descriptor1 = node->right->type_descriptor1;
-//		node->type_descriptor1.pointer_count++;
-//		node->location = 1;
-//
-//		printf("mhi HI(#%d)\n", ctx->stack_size - node->right->address);
-//		printf("ori LO(#%d)\n", ctx->stack_size - node->right->address);
-//		puts("add r0, sp");
-//		puts("push r0");
-//		ctx->stack_size++;
-//
-//		return;
-//	}
-
 	if(node->type == NODE_REF)
 	{
 		*node = *node->right;
@@ -618,6 +622,24 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 		return;
 	}
 
+	if(node->type == NODE_SUBSCRIPT)
+	{
+		node->type_descriptor1 = node->left->type_descriptor1;
+
+		load_node_to_register(node->right, ctx);
+		puts("mov r1, r0");
+		printf("mhi HI(#%d)\n", node->left->type_descriptor1.size);
+		printf("ori LO(#%d)\n", node->left->type_descriptor1.size);
+		puts("mul r1, r0");
+		load_node_to_register(node->left, ctx);
+		puts("add r0, r1");
+		puts("push r0");
+		node->location = 1;
+		node->deref_count++;
+		ctx->stack_size++;
+		return;
+	}
+
 	if(node->type == NODE_ADD)
 	{
 		//TODO: Do some sane type checking here
@@ -667,7 +689,7 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*last_index = token_vector_index;
 			return true;
 		}
-		if (current_token->type == TOKEN_TYPE_CLOSE_PAREN)
+		if (current_token->type == TOKEN_TYPE_CLOSE_PAREN || current_token->type == TOKEN_TYPE_CLOSE_BRACKET)
 		{
 			parser_close_paren(parser_ctx);
 			continue;
@@ -684,6 +706,20 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 					recent_node->precedence = node_precedence(recent_node->type);
 				}
 			}
+			continue;
+		}
+		if(current_token->type == TOKEN_TYPE_OPEN_BRACKET)
+		{
+			Node *node = malloc(sizeof(Node));
+			*node = (Node)
+			{
+				.token = current_token,
+				.type = NODE_SUBSCRIPT,
+				.paren_count = 1
+			};
+			node->precedence = node_precedence(node->type);
+			parser_append_node(parser_ctx, node);
+			recent_node = node;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_PLUS)
