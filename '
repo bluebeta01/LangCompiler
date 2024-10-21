@@ -115,7 +115,6 @@ typedef enum NodeType
 	NODE_COMMA,
 	NODE_ASSIGN,
 	NODE_SUBSCRIPT,
-	NODE_END_OF_EXP,
 	NODE_CALL
 } NodeType;
 
@@ -138,9 +137,6 @@ int node_precedence(NodeType type)
 {
 	switch(type)
 	{
-		case NODE_END_OF_EXP:
-		return -1;
-
 		case NODE_ASSIGN:
 		return 0;
 
@@ -170,12 +166,10 @@ typedef struct
 {
 	Node *root_node;
 	Node *active_node;
-	int paren_counter;
 } ExpressionParserCtx;
 
 void parser_close_paren(ExpressionParserCtx *ctx)
 {
-	ctx->paren_counter++;
 	if(!ctx->root_node) return;
 	Node *new_active = ctx->root_node;
 	Node *old_active = new_active;
@@ -191,10 +185,9 @@ void parser_close_paren(ExpressionParserCtx *ctx)
 		iter = iter->right;
 	}
 
-	if(old_active->paren_count == ctx->paren_counter)
+	if(old_active->paren_count == 0)
 	{
 		ctx->active_node = new_active;
-		ctx->paren_counter = 0;
 	}
 }
 
@@ -222,29 +215,22 @@ void parser_append_node(ExpressionParserCtx *ctx, Node *node)
 		replaced_node = replaced_node->right;
 	}
 
-	if(!replaced_node->right && node->precedence > replaced_node->precedence && !(replaced_node->paren_count > 0 && replaced_node != ctx->active_node))
+	if(!replaced_node->right &&  !(replaced_node->paren_count > 0 && replaced_node != ctx->active_node))
 	{
 		replaced_node->right = node;
 		if(node->paren_count > 0) ctx->active_node = node;
 		return;
 	}
 
-	if(!replaced_node->right && replaced_node->paren_count > 0 && replaced_node == ctx->active_node)
-	{
-		replaced_node->right = node;
-		if(node->paren_count > 0) ctx->active_node = node;
-		return;
-	}
-
-	if(replaced_node->paren_count > 0 && replaced_node == ctx->active_node && ctx->active_node != ctx->root_node)
-	{
-		if(!replaced_node->right)
-		{
-			replaced_node->right = node;
-			return;
-		}
-		replaced_node = replaced_node->right;
-	}
+//	if(replaced_node->paren_count > 0)
+//	{
+//		if(!replaced_node->right)
+//		{
+//			replaced_node->right = node;
+//			return;
+//		}
+//		replaced_node = replaced_node->right;
+//	}
 
 
 	//Rotate
@@ -563,29 +549,6 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 	if(node->type == NODE_VARIABLE || node->type == NODE_CONSTANT || node->type == NODE_DECLARE_VAR)
 		return;
 
-	if(node->type == NODE_END_OF_EXP)
-	{
-		if(node->left && node->left->type == NODE_DECLARE_VAR)
-		{
-			ProgramVariable pv = {0};
-			pv.address = ctx->stack_size;
-			pv.token = node->left->token;
-			pv.type_descriptor1 = node->left->type_descriptor1;
-			prog_var_stack_push(&ctx->prog_var_stack, &pv);
-		
-			ctx->stack_size += node->left->type_descriptor1.size;
-			puts("movi #0");
-			for(int i = 0; i < node->left->type_descriptor1.size; i++)
-			{
-				puts("push r0");
-			}
-
-			return;
-		}
-
-		return;
-	}
-
 	if(!node->right)
 	{
 		puts("Operator requires rvalue");
@@ -731,14 +694,6 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 		}
 		if (current_token->type == TOKEN_TYPE_SEMICOLON)
 		{
-			Node *node = malloc(sizeof(Node));
-			*node = (Node)
-			{
-				.token = &tv->data[token_vector_index],
-				.type = NODE_END_OF_EXP
-			};
-			node->precedence = node_precedence(node->type);
-			parser_append_node(parser_ctx, node);
 			*last_index = token_vector_index;
 			return true;
 		}
