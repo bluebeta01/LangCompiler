@@ -177,9 +177,9 @@ void parser_close_paren(ExpressionParserCtx *ctx)
 {
 	ctx->paren_counter++;
 	if(!ctx->root_node) return;
-	Node *new_active = ctx->root_node;
-	Node *old_active = new_active;
-	Node *iter = new_active;
+	Node *new_active = NULL;
+	Node *old_active = NULL;
+	Node *iter = ctx->root_node;
 	while(iter)
 	{
 		if(iter->paren_count > 0)
@@ -188,13 +188,22 @@ void parser_close_paren(ExpressionParserCtx *ctx)
 			old_active = iter;
 		}
 
+		if (iter == ctx->active_node)
+			break;
+
 		iter = iter->right;
 	}
+	
+	if (old_active == NULL)
+	{
+		ctx->active_node = NULL;
+		return;
+	}
 
-	if(old_active->paren_count == ctx->paren_counter)
+	if(old_active->paren_count <= ctx->paren_counter)
 	{
 		ctx->active_node = new_active;
-		ctx->paren_counter = 0;
+		ctx->paren_counter -= old_active->paren_count;
 	}
 }
 
@@ -203,12 +212,28 @@ void parser_append_node(ExpressionParserCtx *ctx, Node *node)
 	if(!ctx->root_node)
 	{
 		ctx->root_node = node;
-		ctx->active_node = node;
+		if (node->paren_count > 0)
+			ctx->active_node = node;
 		return;
 	}
 
-	Node *replaced_node = ctx->active_node;
+	Node *replaced_node = ctx->root_node;
 	Node *parent = replaced_node;
+	if (ctx->active_node)
+	{
+		replaced_node = ctx->active_node;
+		
+		Node *p = NULL;
+		Node *i = ctx->root_node;
+		while(i && i != replaced_node)
+		{
+			p = i;
+			i = i->right;
+		}
+
+		if(p && i == replaced_node)
+			parent = p;
+	}
 	while(true)
 	{
 		if(!replaced_node->right)
@@ -217,35 +242,33 @@ void parser_append_node(ExpressionParserCtx *ctx, Node *node)
 			break;
 		if(replaced_node->paren_count > 0 && replaced_node != ctx->active_node)
 			break;
+		if (replaced_node->paren_count > 0 && ctx->paren_counter > 0)
+			break;
 
 		parent = replaced_node;
 		replaced_node = replaced_node->right;
 	}
 
-	if(!replaced_node->right && node->precedence > replaced_node->precedence && !(replaced_node->paren_count > 0 && replaced_node != ctx->active_node))
+	if(node->paren_count > 0 && !(replaced_node->paren_count > 0 && ctx->paren_counter > 0))
 	{
 		replaced_node->right = node;
 		if(node->paren_count > 0) ctx->active_node = node;
 		return;
 	}
 
-	if(!replaced_node->right && replaced_node->paren_count > 0 && replaced_node == ctx->active_node)
+	if(!replaced_node->right && node->precedence > replaced_node->precedence && !(replaced_node->paren_count > 0 && replaced_node != ctx->active_node) && !(replaced_node->paren_count > 0 && ctx->paren_counter > 0))
 	{
 		replaced_node->right = node;
 		if(node->paren_count > 0) ctx->active_node = node;
 		return;
 	}
 
-	if(replaced_node->paren_count > 0 && replaced_node == ctx->active_node && ctx->active_node != ctx->root_node)
+	if(replaced_node == ctx->active_node)
 	{
-		if(!replaced_node->right)
-		{
-			replaced_node->right = node;
-			return;
-		}
-		replaced_node = replaced_node->right;
+		node->paren_count += replaced_node->paren_count - ctx->paren_counter;
+		replaced_node->paren_count -= replaced_node->paren_count - ctx->paren_counter;
+		ctx->paren_counter = 0;
 	}
-
 
 	//Rotate
 	Node **slot = &node->left;
@@ -259,6 +282,8 @@ void parser_append_node(ExpressionParserCtx *ctx, Node *node)
 		}
 		*slot = replaced_node;
 		ctx->root_node = node;
+		if (node->paren_count > 0)
+			ctx->active_node = node;
 		return;
 	}
 	if(replaced_node == parent)
@@ -614,36 +639,6 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 
 	if(node->type == NODE_ASSIGN)
 	{
-		if(node->left->deref_count > 0)
-		{
-			load_node_to_register(node->right, ctx);
-			puts("mov r1, r0");
-
-			if(node->left->location == 0)
-			{
-				printf("mhi HI(#%d)\n", ctx->stack_size - node->left->address);
-				printf("ori LO(#%d)\n", ctx->stack_size - node->left->address);
-				puts("add r0, sp");
-			}
-			else
-			{
-				puts("pop r0");
-				ctx->stack_size--;
-			}
-
-			int deref_count = node->left->deref_count;
-			if(node->left->location == 1)
-				deref_count--;
-			for(int i = 0; i < deref_count; i++)
-			{
-				puts("ldr r0, r0");
-			}
-
-			puts("str r0, r1");
-
-			return;
-		}
-
 		if(node->left->type == NODE_DECLARE_VAR)
 		{
 			load_node_to_register(node->right, ctx);
@@ -657,11 +652,17 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 			prog_var_stack_push(&ctx->prog_var_stack, &pv);
 
 			ctx->stack_size++;
+			return;
 		}
 
-		if(node->left->type == NODE_VARIABLE)
+		if(node->right->type_descriptor1.pointer_count > node->right->deref_count || (node->right->type_descriptor1.pointer_count == node->right->deref_count && type_descriptor_primitive_width(&node->right->type_descriptor1) == 1))
 		{
-			copy_node_to_address(node->left, node->right, ctx);
+			load_node_to_register(node->right, ctx);
+			puts("mov r1, r0");
+			node->left->deref_count--;
+			load_node_to_register(node->left, ctx);
+			puts("str r0, r1");
+			return;
 		}
 
 		return;
@@ -706,11 +707,10 @@ void emit_expression_asm(Node *node, CompilerContext *ctx)
 bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx *parser_ctx, CompilerContext *compiler_ctx,
 					int *last_index)
 {
-	Node *recent_node = NULL;
+	int paren_count = 0;
 	int token_vector_index = start_index;
 	for (; token_vector_index < tv->length; token_vector_index++)
 	{
-		int paren_count = 0;
 		Token *current_token = &tv->data[token_vector_index];
 		TypeDescriptor type_descriptor;
 		int new_index = type_descriptor_from_tokens(tv, token_vector_index, &type_descriptor);
@@ -722,10 +722,11 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 				.token = &tv->data[new_index],
 				.type = NODE_DECLARE_VAR,
 				.type_descriptor1 = type_descriptor,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			token_vector_index = new_index;
 			continue;
 		}
@@ -735,10 +736,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = &tv->data[token_vector_index],
-				.type = NODE_END_OF_EXP
+				.type = NODE_END_OF_EXP,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
+			paren_count = 0;
 			*last_index = token_vector_index;
 			return true;
 		}
@@ -749,16 +752,7 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 		}
 		if (current_token->type == TOKEN_TYPE_OPEN_PAREN)
 		{
-			if (recent_node)
-			{
-				recent_node->paren_count++;
-				parser_ctx->active_node = recent_node;
-				if(recent_node->type == NODE_VARIABLE)
-				{
-					recent_node->type = NODE_CALL;
-					recent_node->precedence = node_precedence(recent_node->type);
-				}
-			}
+			paren_count++;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_OPEN_BRACKET)
@@ -768,11 +762,11 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			{
 				.token = current_token,
 				.type = NODE_SUBSCRIPT,
-				.paren_count = 1
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
+			paren_count++;
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_PLUS)
@@ -781,11 +775,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_ADD
+				.type = NODE_ADD,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_MINUS)
@@ -794,11 +789,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_SUB
+				.type = NODE_SUB,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_STAR)
@@ -807,11 +803,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_DEREF
+				.type = NODE_DEREF,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_AMP)
@@ -820,11 +817,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_REF
+				.type = NODE_REF,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_COMMA)
@@ -833,11 +831,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_COMMA
+				.type = NODE_COMMA,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_INTEGER_LITERAL)
@@ -846,11 +845,17 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_CONSTANT
+				.type = NODE_CONSTANT,
+				.paren_count = paren_count,
+				.type_descriptor1 = (TypeDescriptor)
+				{
+					.primitive_type = PRIMITIVE_TYPE_I16,
+					.size = 1
+				}
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_EQUALS)
@@ -859,11 +864,12 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 			*node = (Node)
 			{
 				.token = current_token,
-				.type = NODE_ASSIGN
+				.type = NODE_ASSIGN,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 			continue;
 		}
 		if(current_token->type == TOKEN_TYPE_IDENTIFIER)
@@ -883,10 +889,11 @@ bool compile_tokens_nodes(TokenVector *tv, int start_index, ExpressionParserCtx 
 				.type = NODE_VARIABLE,
 				.address = pv->address,
 				.type_descriptor1 = pv->type_descriptor1,
+				.paren_count = paren_count
 			};
 			node->precedence = node_precedence(node->type);
 			parser_append_node(parser_ctx, node);
-			recent_node = node;
+			paren_count = 0;
 
 			continue;
 		}
